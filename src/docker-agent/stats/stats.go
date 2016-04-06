@@ -6,6 +6,7 @@ import (
     "github.com/docker/engine-api/client"
     "github.com/docker/engine-api/types"
     "golang.org/x/net/context"
+    "sync"
 )
 
 func main() {
@@ -21,6 +22,34 @@ func main() {
     if err != nil {
         panic(err)
     }
+
+
+    closeChan := make(chan error)
+
+    // waitFirst is a WaitGroup to wait first stat data's reach for each container
+    waitFirst := &sync.WaitGroup{}
+
+    cStats := stats{}
+
+    // getContainerList simulates creation event for all previously existing
+    // containers (only used when calling `docker stats` without arguments).
+    getContainerList := func() {
+        options := types.ContainerListOptions{All: true}
+
+        cs, err := cli.ContainerList(context.Background(), options)
+        if err != nil {
+            closeChan <- err
+        }
+        for _, container := range cs {
+            s := &containerStats{Name: container.ID[:12]}
+            if cStats.add(s) {
+                waitFirst.Add(1)
+                go s.Collect(cli, true, waitFirst)
+            }
+        }
+    }
+
+    getContainerList()
 
     options := types.ContainerListOptions{All: true}
     containers, err := cli.ContainerList(context.Background(), options)
